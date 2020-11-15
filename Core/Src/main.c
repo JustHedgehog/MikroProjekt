@@ -257,7 +257,7 @@ int main(void)
 		  	  	  	  	  	  y++;
 						  }
 					  }while(bx[i+1]==';');
-					  USART_send("Koniec komendy \r \n");
+					  USART_send("Koniec komendy takiej i owakiej \r \n");
 					  break;
 				  }
 			  }
