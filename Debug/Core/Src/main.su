@@ -1,0 +1,12 @@
+main.c:74:6:MySysTick	16	static
+main.c:86:9:USART_RX_IsEmpty	4	static
+main.c:95:9:USART_GC	16	static
+main.c:109:9:USART_GD	32	static
+main.c:135:6:USART_send	536	static,ignoring_inline_asm
+main.c:163:6:HAL_UART_TxCpltCallback	24	static
+main.c:174:6:HAL_UART_RxCpltCallback	16	static
+main.c:194:5:main	280	static
+main.c:280:6:SystemClock_Config	88	static
+main.c:325:13:MX_USART2_UART_Init	8	static
+main.c:358:13:MX_GPIO_Init	48	static
+main.c:394:6:Error_Handler	4	static
