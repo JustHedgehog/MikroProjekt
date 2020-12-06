@@ -25,6 +25,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +43,9 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+DMA_HandleTypeDef hdma_adc1;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
@@ -52,8 +56,8 @@ extern uint16_t arg;
 
 //BUFOROWE ZMIENNE
 
-#define USART_TXBUF_LEN 500 //długość nadawczego bufora
-#define USART_RXBUF_LEN 500 //długość odbiorczego bufora
+#define USART_TXBUF_LEN 2000 //długość nadawczego bufora
+#define USART_RXBUF_LEN 2000 //długość odbiorczego bufora
 uint8_t USART_TxBuf[USART_TXBUF_LEN]; //bufor nadawczy
 uint8_t USART_RxBuf[USART_RXBUF_LEN]; //bufor odbiorczy
 
@@ -62,6 +66,29 @@ __IO int USART_TX_Busy = 0;
 __IO int USART_RX_Empty = 0;
 __IO int USART_RX_Busy = 0;
 
+//ZMIENNE DO GENERACJI SINUSA
+
+uint16_t fs = 10000;
+const double PI = 3.14;
+int f = 1;
+double tablica_wartosci[10000];
+
+//ZMIENNE DO CZUJNIKA TEMPERATURY
+
+uint32_t adcval;
+int temp;
+
+//ZMIENNE DO RAMKI
+
+#define  FRSTART 0x3A
+#define FREND 0x3B
+#define FRCOD 0x5C
+int fr_busy = 0;
+char receiver_name[3];
+char sender_name[3];
+char command[256];
+char frame[263];
+
 
 
 /* USER CODE END PV */
@@ -69,7 +96,9 @@ __IO int USART_RX_Busy = 0;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 void MySysTick(int arg){
 
@@ -107,14 +136,14 @@ uint8_t USART_GC(){
 } //Funkcja zwracająca znak
 
 uint8_t USART_GD(char *buf){
-	static uint8_t bf[128];
+	static uint8_t bf[500];
 	static uint8_t index=0;
 	int i;
 	uint8_t len_com;
 	while(USART_RX_IsEmpty())
 	{
 		bf[index] = USART_GC();
-		if((bf[index] == 59)) //dodać znak końca stringa \0
+		if((bf[index-1] != FRCOD && bf[index] == 59))
 		{
 			for(i=0 ; i<=index ; i++)
 			{
@@ -126,7 +155,7 @@ uint8_t USART_GD(char *buf){
 		}else
 		{
 			index++;
-			if(index>=128) index=0;
+			if(index>=500) index=0;
 		}
 	}
 	return 0;
@@ -180,6 +209,46 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 }
 
 
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1){
+	temp = (adcval*100.0)/1023.0;
+
+}
+
+void generacja_sinusa(double  *tablica_wartosci ) {
+
+	int n,f=1; // n = ilość próbek na jeden okres sygnału
+	double faza_sygnalu;
+	uint16_t i = 0;
+	n = fs / f; //obliczenie ilości próbek w momencie zmiany f
+
+	while (i < n) {
+		faza_sygnalu = ((i * 2 * PI * f) / fs);
+		*(tablica_wartosci+i) = 2048 + (sin(faza_sygnalu) * 2048);
+		i = i + 1;
+	}
+	i = 0;
+}// Funkcja generująca sinusa
+
+
+void clean_frame(char * tab ,int len){
+
+	for(int i = 0 ; i<=len ; i++)
+	{
+		*(tab+i) = '\0';
+	}
+}
+
+
+void clean_after_all(int len){
+
+	fr_busy = 0;
+	clean_frame(frame, len);
+	clean_frame(command, (len - 7));
+	clean_frame(sender_name, 3);
+	clean_frame(receiver_name, 3);
+
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -215,7 +284,9 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_USART2_UART_Init();
+  MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -223,47 +294,81 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
-
+  HAL_ADC_Start_DMA(&hadc1, &adcval, 1); // Start ADC z DMA
 
   int len=0;
-  char bx[128];
-  char komenda[128];
-  int i,y=0;
-
+  char bx[500];
+  generacja_sinusa(tablica_wartosci);
+  clean_frame(frame, len);
   while (1)
   {
-	  len = USART_GD(bx);
-	  arg = 500;
-	  if(ms_set)
-	  {
-		  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-		  ms_set=0;
-	  }
-	  if(len>0){
-		  USART_send("Odebrana zostala wiadomosc %d \r\n",len);
+		len = USART_GD(bx);
+		int y=0,i=0;
 
-		  for(i=0 ; i<128 ; i++){
-			  if(bx[i] == 58)
-			  {
-				  if((bx[i+4] == 'S') && (bx[i+5]=='T') && (bx[i+6]=='M')){
-					  i =+ 7;
-					  USART_send("Poczatek komendy \r \n");
-					  USART_send("Wczytywanie Komendy : %c \r \n",bx[i]);
-					  do{
-						  if(ms_set){
-		  	  	  	  	  	  komenda[y]= bx[i];
-		  	  	  	  	  	  bx[i-7]=0;
-							  ms_set=0;
-		  	  	  	  	  	  y++;
-						  }
-					  }while(bx[i+1]==';');
-					  USART_send("Koniec komendy takiej i owakiej \r \n");
-					  break;
-				  }
-			  }
+		if (len > 0) {
+			USART_send("Odebrana zostala wiadomosc %d \r\n", len);
+			while(i<=len)
+			{
+				if(len<7){break;}
+				else{
+					char singlefrchar = bx[i];
+					if(bx[i] == FRSTART && bx[i+1] == FRSTART)
+					{
+						i++;
+					}else
+					{
+						if(singlefrchar == FRSTART){fr_busy = 1;++i;}
+						if(fr_busy){
+							switch(singlefrchar){
+								case FRCOD:
+								{
+									frame[y] = bx[++i];
+									break;
+								}
+								case FREND:
+								{
+//									USART_send(frame);
+//									funkcja wykonująca komende tutaj prolly
+									memcpy(sender_name , &frame[0], 3);
+									memcpy(receiver_name , &frame[3], 3);
+									memcpy(command , &frame[6], (len-7));
+//									wykonywanie komendy
+									if(strcmp("STM",receiver_name) == 0 && strcmp("STM", sender_name) != 0){
+										if(command[0] == 0){
+											USART_send(":STM%sFREMPTY;\r\n" , sender_name);
+											clean_after_all(len);
+										}else{
+											if(strcmp("temp",command)==0){
+												USART_send(":STM%sZwracanie pomiaru temperatury : %i \r \n", sender_name,temp);
+											}else{
+												USART_send(":STM%sCOM404;\r\n",sender_name);
+												clean_after_all(len);
+											}
+										}
+									}else{
+										clean_after_all(len);
+									}
+									break;
+								}
+								default :
+								{
+									frame[y] = bx[i];
+								}
+							}
+						}
+						y++;
+						if(y > 263)
+						{
+							clean_after_all(len);
+							break;
+						}
+						i++;
+					}
+				}
 
-		  }
-	  }
+			}
+
+		}
 
 
     /* USER CODE END WHILE */
@@ -318,6 +423,56 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+  hadc1.Init.Resolution = ADC_RESOLUTION_10B;
+  hadc1.Init.ScanConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DMAContinuousRequests = ENABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+  */
+  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -347,6 +502,22 @@ static void MX_USART2_UART_Init(void)
   /* USER CODE BEGIN USART2_Init 2 */
 
   /* USER CODE END USART2_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 
 }
 
