@@ -326,7 +326,7 @@ int main(void)
 								{
 									if(bx[i+1] == FRCODS){frame[y] = FRSTART;i++;}
 									else if(bx[i+1] == FRCODE){frame[y] = FREND;i++;}
-									else if(bx[i+1 == FRCOD]){frame[y] = FRCOD; i++;}
+									else if(bx[i+1] == FRCOD){frame[y] = FRCOD; i++;}
 									else{frame[y] = FRCOD;}
 									break;
 								}
