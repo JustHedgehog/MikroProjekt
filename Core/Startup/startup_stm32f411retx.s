@@ -87,6 +87,7 @@ FillZerobss:
 LoopFillZerobss:
   ldr  r3, = _ebss
   cmp  r2, r3
+
   bcc  FillZerobss
 
 /* Call the clock system intitialization function.*/

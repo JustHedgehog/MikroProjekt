@@ -83,6 +83,8 @@ int temp;
 #define  FRSTART 0x3A
 #define FREND 0x3B
 #define FRCOD 0x5C
+#define FRCODS 0x61
+#define FRCODE 0x62
 int fr_busy = 0;
 char receiver_name[3];
 char sender_name[3];
@@ -143,7 +145,7 @@ uint8_t USART_GD(char *buf){
 	while(USART_RX_IsEmpty())
 	{
 		bf[index] = USART_GC();
-		if((bf[index-1] != FRCOD && bf[index] == 59))
+		if((bf[index] == 59))
 		{
 			for(i=0 ; i<=index ; i++)
 			{
@@ -243,7 +245,7 @@ void clean_after_all(int len){
 
 	fr_busy = 0;
 	clean_frame(frame, len);
-	clean_frame(command, (len - 7));
+	clean_frame(command, (len - 6));
 	clean_frame(sender_name, 3);
 	clean_frame(receiver_name, 3);
 
@@ -306,47 +308,49 @@ int main(void)
 		int y=0,i=0;
 
 		if (len > 0) {
-			USART_send("Odebrana zostala wiadomosc %d \r\n", len);
 			while(i<=len)
 			{
 				if(len<7){break;}
 				else{
 					char singlefrchar = bx[i];
-					if(bx[i] == FRSTART && bx[i+1] == FRSTART)
+					if(bx[i] == FRSTART && fr_busy == 1)
 					{
-						i++;
-					}else
-					{
+						clean_frame(frame, y);
+						y=0;
+						fr_busy = 0;
+					}else{
 						if(singlefrchar == FRSTART){fr_busy = 1;++i;}
 						if(fr_busy){
 							switch(singlefrchar){
 								case FRCOD:
 								{
-									frame[y] = bx[++i];
+									if(bx[i+1] == FRCODS){frame[y] = FRSTART;i++;}
+									else if(bx[i+1] == FRCODE){frame[y] = FREND;i++;}
+									else{frame[y] = FRCOD;}
 									break;
 								}
 								case FREND:
 								{
-//									USART_send(frame);
 //									funkcja wykonująca komende tutaj prolly
 									memcpy(sender_name , &frame[0], 3);
 									memcpy(receiver_name , &frame[3], 3);
-									memcpy(command , &frame[6], (len-7));
+									memcpy(command , &frame[6], (y-6));
 //									wykonywanie komendy
 									if(strcmp("STM",receiver_name) == 0 && strcmp("STM", sender_name) != 0){
 										if(command[0] == 0){
 											USART_send(":STM%sFREMPTY;\r\n" , sender_name);
-											clean_after_all(len);
+											clean_after_all(y);
 										}else{
 											if(strcmp("temp",command)==0){
-												USART_send(":STM%sZwracanie pomiaru temperatury : %i \r \n", sender_name,temp);
+												USART_send(":STM%stemp,%i;\r\n", sender_name,temp);
+												clean_after_all(y);
 											}else{
 												USART_send(":STM%sCOM404;\r\n",sender_name);
-												clean_after_all(len);
+												clean_after_all(y);
 											}
 										}
 									}else{
-										clean_after_all(len);
+										clean_after_all(y);
 									}
 									break;
 								}
