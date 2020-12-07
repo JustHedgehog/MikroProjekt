@@ -326,6 +326,7 @@ int main(void)
 								{
 									if(bx[i+1] == FRCODS){frame[y] = FRSTART;i++;}
 									else if(bx[i+1] == FRCODE){frame[y] = FREND;i++;}
+									else if(bx[i+1 == FRCOD]){frame[y] = FRCOD; i++;}
 									else{frame[y] = FRCOD;}
 									break;
 								}
@@ -345,7 +346,7 @@ int main(void)
 												USART_send(":STM%stemp,%i;\r\n", sender_name,temp);
 												clean_after_all(y);
 											}else{
-												USART_send(":STM%sCOM404;\r\n",sender_name);
+												USART_send(":STM%s%s;\r\n",sender_name , command);
 												clean_after_all(y);
 											}
 										}
