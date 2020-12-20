@@ -75,7 +75,6 @@ double tablica_wartosci[10000];
 
 //ZMIENNE DO CZUJNIKA TEMPERATURY
 
-uint32_t adcval;
 int temp;
 
 //ZMIENNE DO RAMKI
@@ -91,7 +90,14 @@ char sender_name[3];
 char command[256];
 char frame[263];
 
+//zmienne do testów
 
+int k=0;
+
+// zmienne do DMA
+
+uint32_t dma_buff[4096];
+uint32_t i=0;
 
 /* USER CODE END PV */
 
@@ -212,9 +218,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1){
-	temp = (adcval*100.0)/1023.0;
-
+	temp = (((dma_buff[1024])*100)/4095);
 }
+
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
+	temp = (((dma_buff[3072])*100)/4095);
+}
+
 
 void generacja_sinusa(double  *tablica_wartosci ) {
 
@@ -250,6 +260,7 @@ void clean_after_all(int len){
 	clean_frame(receiver_name, 3);
 
 }
+
 
 /* USER CODE END PFP */
 
@@ -296,7 +307,8 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
-  HAL_ADC_Start_DMA(&hadc1, &adcval, 1); // Start ADC z DMA
+  HAL_ADC_Start_DMA(&hadc1, dma_buff , 4096); // Start ADC z DMA
+
 
   int len=0;
   char bx[500];
@@ -304,6 +316,7 @@ int main(void)
   clean_frame(frame, len);
   while (1)
   {
+
 		len = USART_GD(bx);
 		int y=0,i=0;
 
@@ -447,8 +460,8 @@ static void MX_ADC1_Init(void)
   /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
-  hadc1.Init.Resolution = ADC_RESOLUTION_10B;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
   hadc1.Init.ScanConvMode = ENABLE;
   hadc1.Init.ContinuousConvMode = ENABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
