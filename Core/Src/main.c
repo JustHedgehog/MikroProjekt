@@ -75,7 +75,7 @@ double tablica_wartosci[10000];
 
 //ZMIENNE DO CZUJNIKA TEMPERATURY
 
-int temp;
+uint32_t temp;
 
 //ZMIENNE DO RAMKI
 
@@ -96,8 +96,9 @@ int k=0;
 
 // zmienne do DMA
 
-uint32_t dma_buff[4096];
+uint16_t dma_buff[4096];
 uint32_t i=0;
+uint32_t suma_dma;
 
 /* USER CODE END PV */
 
@@ -218,11 +219,21 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1){
-	temp = (((dma_buff[1024])*100)/4095);
+	int i;
+	suma_dma=0;
+	for(i= 2048 ; i<4096 ; i++){
+		suma_dma += dma_buff[i];
+	}
+	temp = (((suma_dma/2048)*100)/4095);
 }
 
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
-	temp = (((dma_buff[3072])*100)/4095);
+	int i;
+	suma_dma=0;
+	for(i= 0 ; i<2048 ; i++){
+		suma_dma += dma_buff[i];
+	}
+	temp = (((suma_dma/2048)*100)/4095);
 }
 
 
@@ -308,7 +319,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
   HAL_ADC_Start_DMA(&hadc1, dma_buff , 4096); // Start ADC z DMA
-
+  HAL_Delay(50);
 
   int len=0;
   char bx[500];
