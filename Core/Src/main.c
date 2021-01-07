@@ -89,6 +89,7 @@ char receiver_name[3];
 char sender_name[3];
 char command[256];
 char frame[263];
+int frame_read=0;
 
 //zmienne do testów
 
@@ -152,19 +153,30 @@ uint8_t USART_GD(char *buf){
 	while(USART_RX_IsEmpty())
 	{
 		bf[index] = USART_GC();
-		if((bf[index] == 59))
-		{
-			for(i=0 ; i<=index ; i++)
-			{
-				buf[i]=bf[i];
+		if (frame_read == 1 && bf[index] == FRSTART) {
+			bf[0] = bf[index];
+			index = 0;
+		}
+		if (frame_read == 0) {
+			if (bf[index] == FRSTART) {
+				frame_read = 1;
 			}
-			len_com=index;
-			index=0;
-			return len_com;
-		}else
-		{
-			index++;
-			if(index>=500) index=0;
+		}
+		if (frame_read == 1) {
+			if ((bf[index] == FREND)) {
+				for (i = 0; i <= index; i++) {
+					buf[i] = bf[i];
+				}
+				len_com = index;
+				index = 0;
+				frame_read = 0;
+				return len_com;
+			} else {
+				index++;
+				if (index >= 265) {
+					index = 0;
+				}
+			}
 		}
 	}
 	return 0;
@@ -224,7 +236,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1){
 	for(i= 2048 ; i<4096 ; i++){
 		suma_dma += dma_buff[i];
 	}
-	temp = (((suma_dma/2048)*100)/4095);
+	temp = (((suma_dma/2048)*5)/4095)*100;
 }
 
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
@@ -233,7 +245,7 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
 	for(i= 0 ; i<2048 ; i++){
 		suma_dma += dma_buff[i];
 	}
-	temp = (((suma_dma/2048)*100)/4095);
+	temp = (((suma_dma/2048)*5)/4095)*100;
 }
 
 
@@ -264,7 +276,6 @@ void clean_frame(char * tab ,int len){
 
 void clean_after_all(int len){
 
-	fr_busy = 0;
 	clean_frame(frame, len);
 	clean_frame(command, (len - 6));
 	clean_frame(sender_name, 3);
@@ -319,91 +330,81 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
   HAL_ADC_Start_DMA(&hadc1, dma_buff , 4096); // Start ADC z DMA
-  HAL_Delay(50);
 
   int len=0;
   char bx[500];
+  clean_frame(bx,499);
   generacja_sinusa(tablica_wartosci);
   clean_frame(frame, len);
-  while (1)
-  {
+	while (1) {
 
 		len = USART_GD(bx);
-		int y=0,i=0;
-
+		int y = 0, i = 0;
 		if (len > 0) {
-			while(i<=len)
-			{
-				if(len<7){break;}
-				else{
-					char singlefrchar = bx[i];
-					if(bx[i] == FRSTART && fr_busy == 1)
-					{
-						clean_frame(frame, y);
-						y=0;
-						fr_busy = 0;
-					}else{
-						if(singlefrchar == FRSTART){fr_busy = 1;++i;}
-						if(fr_busy){
-							switch(singlefrchar){
-								case FRCOD:
-								{
-									if(bx[i+1] == FRCODS){frame[y] = FRSTART;i++;}
-									else if(bx[i+1] == FRCODE){frame[y] = FREND;i++;}
-									else if(bx[i+1] == FRCOD){frame[y] = FRCOD; i++;}
-									else{frame[y] = FRCOD;}
-									break;
-								}
-								case FREND:
-								{
-//									funkcja wykonująca komende tutaj prolly
-									memcpy(sender_name , &frame[0], 3);
-									memcpy(receiver_name , &frame[3], 3);
-									memcpy(command , &frame[6], (y-6));
-//									wykonywanie komendy
-									if(strcmp("STM",receiver_name) == 0 && strcmp("STM", sender_name) != 0){
-										if(command[0] == 0){
-											USART_send(":STM%sFREMPTY;\r\n" , sender_name);
-											clean_after_all(y);
-										}else{
-											if(strcmp("temp",command)==0){
-												USART_send(":STM%stemp,%i;\r\n", sender_name,temp);
-												clean_after_all(y);
-											}else{
-												USART_send(":STM%s%s;\r\n",sender_name , command);
-												clean_after_all(y);
-											}
-										}
-									}else{
-										clean_after_all(y);
-									}
-									break;
-								}
-								default :
-								{
-									frame[y] = bx[i];
+			while (i <= len) {
+				if (len < 7) {
+					break;
+				}
+				char singlefrchar = bx[i];
+				switch (singlefrchar) {
+					case FRCOD: {
+						if (bx[i + 1] == FRCODS) {
+							frame[y] = FRSTART;
+							i++;
+						} else if (bx[i + 1] == FRCODE) {
+							frame[y] = FREND;
+							i++;
+						} else if (bx[i + 1] == FRCOD) {
+							frame[y] = FRCOD;
+							i++;
+						} else {
+							i = len;
+							clean_frame(bx,len);
+						}
+						break;
+					}
+					case FREND: {
+	//					funkcja wykonująca komende tutaj prolly
+						memcpy(sender_name, &frame[1], 3);
+						memcpy(receiver_name, &frame[4], 3);
+						memcpy(command, &frame[7], (y - 6));
+	//					wykonywanie komendy
+						if (strcmp("STM", receiver_name) == 0
+								&& strcmp("STM", sender_name) != 0) {
+							if (command[0] == 0) {
+								USART_send(":STM%sFREMPTY;\r\n", sender_name);
+								clean_after_all(y);
+							} else {
+								if (strcmp("temp", command) == 0) {
+									USART_send(":STM%stemp,%i;\r\n", sender_name,
+											temp);
+									clean_after_all(y);
+								}else if(strcmp("sin",command) == 0){
+
+								}else {
+									USART_send(":STM%s%s;\r\n", sender_name,
+											command);
+									clean_after_all(y);
 								}
 							}
+						} else {
+							clean_after_all(y);
 						}
-						y++;
-						if(y > 263)
-						{
-							clean_after_all(len);
-							break;
-						}
-						i++;
+						break;
+					}
+					default: {
+						frame[y] = bx[i];
 					}
 				}
-
+				y++;
+				i++;
 			}
-
 		}
-
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+	}
   /* USER CODE END 3 */
 }
 
@@ -490,7 +491,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -565,21 +566,11 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-
   /*Configure GPIO pin : SW_BLUE_Pin */
   GPIO_InitStruct.Pin = SW_BLUE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(SW_BLUE_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
 }
 
