@@ -71,7 +71,7 @@ __IO int USART_RX_Busy = 0;
 uint16_t fs = 10000;
 const double PI = 3.14;
 int f = 1;
-double tablica_wartosci[10000];
+int tablica_wartosci[10000];
 
 //ZMIENNE DO CZUJNIKA TEMPERATURY
 
@@ -173,7 +173,7 @@ uint8_t USART_GD(char *buf){
 				return len_com;
 			} else {
 				index++;
-				if (index >= 265) {
+				if (index >= 500) {
 					index = 0;
 				}
 			}
@@ -249,7 +249,7 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
 }
 
 
-void generacja_sinusa(double  *tablica_wartosci ) {
+void generacja_sinusa(int  *tablica_wartosci ) {
 
 	int n,f=1; // n = ilość próbek na jeden okres sygnału
 	double faza_sygnalu;
@@ -281,6 +281,15 @@ void clean_after_all(int len){
 	clean_frame(sender_name, 3);
 	clean_frame(receiver_name, 3);
 
+}
+
+int tmp_to_hz(uint32_t temp){
+	int value,hz=200;
+	value = -55+temp;
+	for(int i =0 ; i<value;i++){
+		hz=+9;
+	}
+	return hz;
 }
 
 
@@ -380,7 +389,12 @@ int main(void)
 											temp);
 									clean_after_all(y);
 								}else if(strcmp("sin",command) == 0){
-
+									int hz = tmp_to_hz(temp);
+									USART_send(":STM%ssin",sender_name);
+									for(int i=0; i<10000 ; i+=hz){
+										USART_send(",%i",tablica_wartosci[i]); //do przemyslenia
+									}
+									USART_send(";");
 								}else {
 									USART_send(":STM%s%s;\r\n", sender_name,
 											command);
@@ -401,10 +415,11 @@ int main(void)
 			}
 		}
 
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	}
+  }
   /* USER CODE END 3 */
 }
 
@@ -491,7 +506,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -566,11 +581,21 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : SW_BLUE_Pin */
   GPIO_InitStruct.Pin = SW_BLUE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(SW_BLUE_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LD2_Pin */
+  GPIO_InitStruct.Pin = LD2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
 }
 

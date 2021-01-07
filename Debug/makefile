@@ -28,34 +28,34 @@ endif
 
 -include ../makefile.defs
 
-BUILD_ARTIFACT_NAME := ProjektMikro
+BUILD_ARTIFACT_NAME := ProjektMikroTest
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX := 
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME).$(BUILD_ARTIFACT_EXTENSION)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-ProjektMikro.elf \
+ProjektMikroTest.elf \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-ProjektMikro.list \
+ProjektMikroTest.list \
 
 OBJCOPY_BIN += \
-ProjektMikro.bin \
+ProjektMikroTest.bin \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: ProjektMikro.elf secondary-outputs
+main-build: ProjektMikroTest.elf secondary-outputs
 
 # Tool invocations
-ProjektMikro.elf: $(OBJS) $(USER_OBJS) D:\CubeIDEworkspace\ProjektMikro\STM32F411RETX_FLASH.ld
-	arm-none-eabi-gcc -o "ProjektMikro.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\CubeIDEworkspace\ProjektMikro\STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="ProjektMikro.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+ProjektMikroTest.elf: $(OBJS) $(USER_OBJS) D:\CubeIDEworkspace\ProjektMikroTest\STM32F411RETX_FLASH.ld
+	arm-none-eabi-gcc -o "ProjektMikroTest.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\CubeIDEworkspace\ProjektMikroTest\STM32F411RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="ProjektMikroTest.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -64,13 +64,13 @@ default.size.stdout: $(EXECUTABLES)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-ProjektMikro.list: $(EXECUTABLES)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "ProjektMikro.list"
+ProjektMikroTest.list: $(EXECUTABLES)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "ProjektMikroTest.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
-ProjektMikro.bin: $(EXECUTABLES)
-	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "ProjektMikro.bin"
+ProjektMikroTest.bin: $(EXECUTABLES)
+	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "ProjektMikroTest.bin"
 	@echo 'Finished building: $@'
 	@echo ' '
 
