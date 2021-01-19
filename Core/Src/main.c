@@ -146,21 +146,17 @@ uint8_t USART_GC(){
 } //Funkcja zwracająca znak
 
 uint16_t USART_GD(char *buf){
-	static uint8_t bf[500];
+	static uint8_t bf[1052];
 	static uint16_t index=0;
 	int i;
 	uint16_t len_com;
 	while(USART_RX_IsEmpty())
 	{
 		bf[index] = USART_GC();
-		if (frame_read == 1 && bf[index] == FRSTART) { //przerobić
+		if(bf[index] == FRSTART){
+			frame_read = 1;
 			bf[0] = bf[index];
 			index = 0;
-		}
-		if (frame_read == 0) {
-			if (bf[index] == FRSTART) {
-				frame_read = 1;
-			}
 		}
 		if (frame_read == 1) {
 			if ((bf[index] == FREND)) {
@@ -173,7 +169,7 @@ uint16_t USART_GD(char *buf){
 				return len_com;
 			} else {
 				index++;
-				if (index > 264) {
+				if (index > 526) {
 					index = 0;
 					frame_read = 0;
 				}
@@ -333,11 +329,12 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
-  HAL_ADC_Start_DMA(&hadc1, dma_buff, 4096); // Start ADC z DMA
+  HAL_ADC_Start_DMA(&hadc1,dma_buff, 4096); // Start ADC z DMA
 
-  int len = 0;
-  char bx[500];
-  clean_frame(bx, 499);
+  int len = 0,b=0,a=0,hz;
+  int sin_transmit = 0;
+  char bx[1052]; //ewentualnie 524
+  clean_frame(bx, 1051);
   generacja_sinusa(tablica_wartosci);
   clean_frame(frame, len);
   /* USER CODE END 2 */
@@ -376,24 +373,24 @@ int main(void)
 					memcpy(receiver_name, &frame[4], 3);
 					memcpy(command, &frame[7], (y - 6));
 					//					wykonywanie komendy
-					if (strcmp("STM", receiver_name) == 0
-							&& strcmp("STM", sender_name) != 0) {
-						if (command[0] == 0) { //zmiana na pustą ramkę zmiana 0 na NULL
+					if (memcmp("STM", receiver_name, 3) == 0
+							&& memcmp("STM", sender_name , 3) != 0) {
+						if (memcmp("",command , 1) == 0) {
 							USART_send(":STM%sFREMPTY;\r\n", sender_name);
 							clean_after_all(y);
 						} else {
-							if (strcmp("temp", command) == 0) {
+							if (memcmp("temp", command , 4) == 0) {
 								USART_send(":STM%stemp,%i;\r\n", sender_name,
 										temp);
 								clean_after_all(y);
-							} else if (strcmp("sin", command) == 0) {
-								//								int hz = tmp_to_hz(temp);
-								//								USART_send(":STM%ssin", sender_name);
-								//								for (int i = 0; i < 10000; i += hz) {
-								//									USART_send(",%i", tablica_wartosci[i]); //do przemyslenia
-								//								}
-								//								USART_send(";");
-							} else {
+							} else if (memcmp("sin", command , 3) == 0) {
+								sin_transmit=1;
+								hz = tmp_to_hz(temp);
+							} else if(memcmp("hz",command, 2)==0){
+								hz = tmp_to_hz(temp);
+								USART_send(":STM%shz,%i;\r\n",sender_name, hz);
+							}
+							else{
 								USART_send(":STM%s%s;\r\n", sender_name,
 										command);
 								clean_after_all(y);
@@ -410,6 +407,20 @@ int main(void)
 				}
 				y++;
 				i++;
+			}
+		}
+		if (sin_transmit == 1) {
+			arg = 50;
+			if(ms_set==1){
+				a+=hz;
+				USART_send(":STM%ssin,%i,%i;\r\n", sender_name ,b,tablica_wartosci[a]);
+				a+=hz;
+				b++;
+				ms_set=0;
+			}
+			if(a > 10000){
+				sin_transmit=0;
+				a=0;
 			}
 		}
     /* USER CODE END WHILE */
@@ -577,21 +588,11 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-
   /*Configure GPIO pin : SW_BLUE_Pin */
   GPIO_InitStruct.Pin = SW_BLUE_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(SW_BLUE_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
 }
 
