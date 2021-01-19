@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
+  * <h2><center>&copy; Copyright (c) 2021 STMicroelectronics.
   * All rights reserved.</center></h2>
   *
   * This software component is licensed by ST under BSD 3-Clause license,
@@ -56,7 +56,7 @@ extern uint16_t arg;
 
 //BUFOROWE ZMIENNE
 
-#define USART_TXBUF_LEN 2000 //długość nadawczego bufora
+#define USART_TXBUF_LEN 20000 //długość nadawczego bufora
 #define USART_RXBUF_LEN 2000 //długość odbiorczego bufora
 uint8_t USART_TxBuf[USART_TXBUF_LEN]; //bufor nadawczy
 uint8_t USART_RxBuf[USART_RXBUF_LEN]; //bufor odbiorczy
@@ -85,10 +85,10 @@ uint32_t temp;
 #define FRCODS 0x61
 #define FRCODE 0x62
 int fr_busy = 0;
-char receiver_name[3];
-char sender_name[3];
-char command[256];
-char frame[263];
+char receiver_name[4];
+char sender_name[4];
+char command[257];
+char frame[264];
 int frame_read=0;
 
 //zmienne do testów
@@ -145,15 +145,15 @@ uint8_t USART_GC(){
 	}
 } //Funkcja zwracająca znak
 
-uint8_t USART_GD(char *buf){
+uint16_t USART_GD(char *buf){
 	static uint8_t bf[500];
-	static uint8_t index=0;
+	static uint16_t index=0;
 	int i;
-	uint8_t len_com;
+	uint16_t len_com;
 	while(USART_RX_IsEmpty())
 	{
 		bf[index] = USART_GC();
-		if (frame_read == 1 && bf[index] == FRSTART) {
+		if (frame_read == 1 && bf[index] == FRSTART) { //przerobić
 			bf[0] = bf[index];
 			index = 0;
 		}
@@ -173,8 +173,9 @@ uint8_t USART_GD(char *buf){
 				return len_com;
 			} else {
 				index++;
-				if (index >= 500) {
+				if (index > 264) {
 					index = 0;
+					frame_read = 0;
 				}
 			}
 		}
@@ -236,7 +237,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1){
 	for(i= 2048 ; i<4096 ; i++){
 		suma_dma += dma_buff[i];
 	}
-	temp = (((suma_dma/2048)*5)/4095)*100;
+	temp = (((suma_dma/2048)*3.3)/4095)*100;
 }
 
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
@@ -245,7 +246,7 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
 	for(i= 0 ; i<2048 ; i++){
 		suma_dma += dma_buff[i];
 	}
-	temp = (((suma_dma/2048)*5)/4095)*100;
+	temp = (((suma_dma/2048)*3.3)/4095)*100;
 }
 
 
@@ -292,7 +293,6 @@ int tmp_to_hz(uint32_t temp){
 	return hz;
 }
 
-
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -332,21 +332,19 @@ int main(void)
   MX_USART2_UART_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
+  HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
+  HAL_ADC_Start_DMA(&hadc1, dma_buff, 4096); // Start ADC z DMA
 
+  int len = 0;
+  char bx[500];
+  clean_frame(bx, 499);
+  generacja_sinusa(tablica_wartosci);
+  clean_frame(frame, len);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
-  HAL_ADC_Start_DMA(&hadc1, dma_buff , 4096); // Start ADC z DMA
-
-  int len=0;
-  char bx[500];
-  clean_frame(bx,499);
-  generacja_sinusa(tablica_wartosci);
-  clean_frame(frame, len);
 	while (1) {
-
 		len = USART_GD(bx);
 		int y = 0, i = 0;
 		if (len > 0) {
@@ -356,66 +354,64 @@ int main(void)
 				}
 				char singlefrchar = bx[i];
 				switch (singlefrchar) {
-					case FRCOD: {
-						if (bx[i + 1] == FRCODS) {
-							frame[y] = FRSTART;
-							i++;
-						} else if (bx[i + 1] == FRCODE) {
-							frame[y] = FREND;
-							i++;
-						} else if (bx[i + 1] == FRCOD) {
-							frame[y] = FRCOD;
-							i++;
-						} else {
-							i = len;
-							clean_frame(bx,len);
-						}
-						break;
+				case FRCOD: {
+					if (bx[i + 1] == FRCODS) {
+						frame[y] = FRSTART;
+						i++;
+					} else if (bx[i + 1] == FRCODE) {
+						frame[y] = FREND;
+						i++;
+					} else if (bx[i + 1] == FRCOD) {
+						frame[y] = FRCOD;
+						i++;
+					} else {
+						i = len;
+						clean_frame(bx, len);
 					}
-					case FREND: {
-	//					funkcja wykonująca komende tutaj prolly
-						memcpy(sender_name, &frame[1], 3);
-						memcpy(receiver_name, &frame[4], 3);
-						memcpy(command, &frame[7], (y - 6));
-	//					wykonywanie komendy
-						if (strcmp("STM", receiver_name) == 0
-								&& strcmp("STM", sender_name) != 0) {
-							if (command[0] == 0) {
-								USART_send(":STM%sFREMPTY;\r\n", sender_name);
-								clean_after_all(y);
-							} else {
-								if (strcmp("temp", command) == 0) {
-									USART_send(":STM%stemp,%i;\r\n", sender_name,
-											temp);
-									clean_after_all(y);
-								}else if(strcmp("sin",command) == 0){
-									int hz = tmp_to_hz(temp);
-									USART_send(":STM%ssin",sender_name);
-									for(int i=0; i<10000 ; i+=hz){
-										USART_send(",%i",tablica_wartosci[i]); //do przemyslenia
-									}
-									USART_send(";");
-								}else {
-									USART_send(":STM%s%s;\r\n", sender_name,
-											command);
-									clean_after_all(y);
-								}
-							}
-						} else {
+					break;
+				}
+				case FREND: {
+					//					funkcja wykonująca komende tutaj prolly
+					memcpy(sender_name, &frame[1], 3);
+					memcpy(receiver_name, &frame[4], 3);
+					memcpy(command, &frame[7], (y - 6));
+					//					wykonywanie komendy
+					if (strcmp("STM", receiver_name) == 0
+							&& strcmp("STM", sender_name) != 0) {
+						if (command[0] == 0) { //zmiana na pustą ramkę zmiana 0 na NULL
+							USART_send(":STM%sFREMPTY;\r\n", sender_name);
 							clean_after_all(y);
+						} else {
+							if (strcmp("temp", command) == 0) {
+								USART_send(":STM%stemp,%i;\r\n", sender_name,
+										temp);
+								clean_after_all(y);
+							} else if (strcmp("sin", command) == 0) {
+								//								int hz = tmp_to_hz(temp);
+								//								USART_send(":STM%ssin", sender_name);
+								//								for (int i = 0; i < 10000; i += hz) {
+								//									USART_send(",%i", tablica_wartosci[i]); //do przemyslenia
+								//								}
+								//								USART_send(";");
+							} else {
+								USART_send(":STM%s%s;\r\n", sender_name,
+										command);
+								clean_after_all(y);
+							}
 						}
-						break;
+					} else {
+						clean_after_all(y);
 					}
-					default: {
-						frame[y] = bx[i];
-					}
+					break;
+				}
+				default: {
+					frame[y] = bx[i];
+				}
 				}
 				y++;
 				i++;
 			}
 		}
-
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
