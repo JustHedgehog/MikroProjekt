@@ -35,6 +35,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+void clean_frame(char * tab ,int len);
+void clean_after_all(int len);
+int tmp_to_hz(uint32_t temp);
+void clean_frame(char * tab ,int len);
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,8 +61,8 @@ extern uint16_t arg;
 
 //BUFOROWE ZMIENNE
 
-#define USART_TXBUF_LEN 30000 //długość nadawczego bufora
-#define USART_RXBUF_LEN 20000 //długość odbiorczego bufora
+#define USART_TXBUF_LEN 2000 //długość nadawczego bufora
+#define USART_RXBUF_LEN 2000 //długość odbiorczego bufora
 uint8_t USART_TxBuf[USART_TXBUF_LEN]; //bufor nadawczy
 uint8_t USART_RxBuf[USART_RXBUF_LEN]; //bufor odbiorczy
 
@@ -94,12 +99,18 @@ int frame_read=0;
 //zmienne do testów
 
 int k=0;
+int zakonczone = 1;
 
 // zmienne do DMA
 
 uint16_t dma_buff[4096];
 uint32_t i=0;
 uint32_t suma_dma;
+
+//Zmienne ogolnie
+
+int sin_transmit = 0;
+int hz=0;
 
 /* USER CODE END PV */
 
@@ -148,6 +159,7 @@ uint8_t USART_GC(){
 uint16_t USART_GD(char *buf){
 	static uint8_t bf[1052];
 	static uint16_t index=0;
+	uint8_t buff_helper[1052];
 	uint16_t len_com;
 	while(USART_RX_IsEmpty())
 	{
@@ -160,12 +172,71 @@ uint16_t USART_GD(char *buf){
 		if (frame_read == 1) {
 			if ((bf[index] == FREND)) {
 				for (int i = 0; i <= index; i++) {
-					buf[i] = bf[i];
+					buff_helper[i] = bf[i];
 				}
 				len_com = index;
+				int y = 0, i = 0;
+				if (len_com > 6) {
+					while (i <= len_com) {
+						char singlefrchar = buff_helper[i];
+						switch (singlefrchar) {
+						case FRCOD: {
+							if (buff_helper[i + 1] == FRCODS) {
+								frame[y] = FRSTART;
+								i++;
+							} else if (buff_helper[i + 1] == FRCODE) {
+								frame[y] = FREND;
+								i++;
+							} else if (buff_helper[i + 1] == FRCOD) {
+								frame[y] = FRCOD;
+								i++;
+							} else {
+								i = len_com;
+							}
+							break;
+						}
+						case FREND: {
+							memcpy(sender_name, &frame[1], 3);
+							memcpy(receiver_name, &frame[4], 3);
+							memcpy(command, &frame[7], (y - 6));
+							//					wykonywanie komendy
+							if (memcmp("STM", receiver_name, 3) == 0
+									&& memcmp("STM", sender_name, 3) != 0) {
+								if (memcmp("", command, 1) == 0) {
+									USART_send(":STM%sFREMPTY;\r\n", sender_name);
+									clean_after_all(y);
+								} else {
+									if (memcmp("temp", command, 4) == 0) {
+										USART_send(":STM%stemp,%i;\r\n", sender_name,temp);
+										clean_after_all(y);
+									} else if (memcmp("sin", command, 3) == 0) {
+										sin_transmit = 1;
+										hz = tmp_to_hz(temp);
+									} else if (memcmp("hz", command, 2) == 0) {
+										hz = tmp_to_hz(temp);
+										USART_send(":STM%shz,%i;\r\n", sender_name, hz);
+										clean_after_all(y);
+
+									} else {
+										USART_send(":STM%sCOM404;\r\n", sender_name);
+										clean_after_all(y);
+
+									}
+								}
+							} else {
+								clean_after_all(y);
+							}
+							break;
+						}
+						default: {
+							frame[y] = buff_helper[i];
+						}
+						}
+						y++;
+						i++;
+					}
+				}
 				index = 0;
-				frame_read = 0;
-				return len_com;
 			} else {
 				index++;
 				if (index > 526) {
@@ -200,6 +271,7 @@ void USART_send(char* format,...){
 		USART_TX_Busy++;
 		if(USART_TX_Busy >= USART_TXBUF_LEN) USART_TX_Busy = 0;
 		HAL_UART_Transmit_IT(&huart2,&tmp,1);
+
 	}else{
 		USART_TX_Empty = index;
 	}
@@ -274,8 +346,6 @@ void clean_after_all(int len){
 
 	clean_frame(frame, len);
 	clean_frame(command, (len - 6));
-	clean_frame(sender_name, 3);
-	clean_frame(receiver_name, 3);
 
 }
 
@@ -287,6 +357,7 @@ int tmp_to_hz(uint32_t temp){
 	}
 	return hz;
 }
+
 
 /* USER CODE END PFP */
 
@@ -330,79 +401,21 @@ int main(void)
   HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
   HAL_ADC_Start_DMA(&hadc1,dma_buff, 4096); // Start ADC z DMA
 
-  int len = 0,b=0,a=0,hz;
-  int sin_transmit = 0;
+  int len = 0,b=0,a=0;
   char bx[1052]; //ewentualnie 526
   clean_frame(bx, 1051);
   generacja_sinusa(tablica_wartosci);
   clean_frame(frame, len);
+  arg=200;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1) {
-		len = USART_GD(bx);
-		int y = 0, i = 0;
-		if (len > 6) {
-			while (i <= len) {
-				char singlefrchar = bx[i];
-				switch (singlefrchar) {
-				case FRCOD: {
-					if (bx[i + 1] == FRCODS) {
-						frame[y] = FRSTART;
-						i++;
-					} else if (bx[i + 1] == FRCODE) {
-						frame[y] = FREND;
-						i++;
-					} else if (bx[i + 1] == FRCOD) {
-						frame[y] = FRCOD;
-						i++;
-					} else {
-						i = len;
-						clean_frame(bx, len);
-					}
-					break;
-				}
-				case FREND: {
-					memcpy(sender_name, &frame[1], 3);
-					memcpy(receiver_name, &frame[4], 3);
-					memcpy(command, &frame[7], (y - 6));
-					//					wykonywanie komendy
-					if (memcmp("STM", receiver_name, 3) == 0
-							&& memcmp("STM", sender_name , 3) != 0) {
-						if (memcmp("",command , 1) == 0) {
-							USART_send(":STM%sFREMPTY;\r\n", sender_name);
-							clean_after_all(y);
-						} else {
-							if (memcmp("temp", command , 4) == 0) {
-								USART_send(":STM%stemp,%i;\r\n", sender_name,
-										temp);
-								clean_after_all(y);
-							} else if (memcmp("sin", command , 3) == 0) {
-								sin_transmit=1;
-								hz = tmp_to_hz(temp);
-							} else if(memcmp("hz",command, 2)==0){
-								hz = tmp_to_hz(temp);
-								USART_send(":STM%shz,%i;\r\n",sender_name, hz);
-								clean_after_all(y);
-							}
-							else{
-								USART_send(":STM%sCOM404;\r\n", sender_name);
-								clean_after_all(y);
-							}
-						}
-					} else {
-						clean_after_all(y);
-					}
-					break;
-				}
-				default: {
-					frame[y] = bx[i];
-				}
-				}
-				y++;
-				i++;
-			}
+
+		if(ms_set==1){
+			USART_GD(bx);
+			ms_set=0;
 		}
 		if (sin_transmit == 1) {
 			arg = 50;
@@ -411,6 +424,7 @@ int main(void)
 				a=0;
 				b=0;
 				clean_after_all(10);
+				arg=200;
 			}else{
 				if(ms_set==1){
 					USART_send(":STM%ssin,%i,%i;\r\n", sender_name ,b,tablica_wartosci[a]);
@@ -420,7 +434,6 @@ int main(void)
 				}
 			}
 		}
-
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
