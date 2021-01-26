@@ -56,8 +56,8 @@ extern uint16_t arg;
 
 //BUFOROWE ZMIENNE
 
-#define USART_TXBUF_LEN 20000 //długość nadawczego bufora
-#define USART_RXBUF_LEN 2000 //długość odbiorczego bufora
+#define USART_TXBUF_LEN 30000 //długość nadawczego bufora
+#define USART_RXBUF_LEN 20000 //długość odbiorczego bufora
 uint8_t USART_TxBuf[USART_TXBUF_LEN]; //bufor nadawczy
 uint8_t USART_RxBuf[USART_RXBUF_LEN]; //bufor odbiorczy
 
@@ -148,7 +148,6 @@ uint8_t USART_GC(){
 uint16_t USART_GD(char *buf){
 	static uint8_t bf[1052];
 	static uint16_t index=0;
-	int i;
 	uint16_t len_com;
 	while(USART_RX_IsEmpty())
 	{
@@ -160,7 +159,7 @@ uint16_t USART_GD(char *buf){
 		}
 		if (frame_read == 1) {
 			if ((bf[index] == FREND)) {
-				for (i = 0; i <= index; i++) {
+				for (int i = 0; i <= index; i++) {
 					buf[i] = bf[i];
 				}
 				len_com = index;
@@ -180,7 +179,7 @@ uint16_t USART_GD(char *buf){
 }//Funkcja odbierająca dane
 
 void USART_send(char* format,...){
-	char tmp_s[512];
+	char tmp_s[1052];
 	int i;
 	__IO int index;
 	va_list arglist;
@@ -282,9 +281,9 @@ void clean_after_all(int len){
 
 int tmp_to_hz(uint32_t temp){
 	int value,hz=200;
-	value = -55+temp;
+	value = 55+temp;
 	for(int i =0 ; i<value;i++){
-		hz=+9;
+		hz+=9;
 	}
 	return hz;
 }
@@ -333,7 +332,7 @@ int main(void)
 
   int len = 0,b=0,a=0,hz;
   int sin_transmit = 0;
-  char bx[1052]; //ewentualnie 524
+  char bx[1052]; //ewentualnie 526
   clean_frame(bx, 1051);
   generacja_sinusa(tablica_wartosci);
   clean_frame(frame, len);
@@ -344,11 +343,8 @@ int main(void)
 	while (1) {
 		len = USART_GD(bx);
 		int y = 0, i = 0;
-		if (len > 0) {
+		if (len > 6) {
 			while (i <= len) {
-				if (len < 7) {
-					break;
-				}
 				char singlefrchar = bx[i];
 				switch (singlefrchar) {
 				case FRCOD: {
@@ -368,7 +364,6 @@ int main(void)
 					break;
 				}
 				case FREND: {
-					//					funkcja wykonująca komende tutaj prolly
 					memcpy(sender_name, &frame[1], 3);
 					memcpy(receiver_name, &frame[4], 3);
 					memcpy(command, &frame[7], (y - 6));
@@ -389,10 +384,10 @@ int main(void)
 							} else if(memcmp("hz",command, 2)==0){
 								hz = tmp_to_hz(temp);
 								USART_send(":STM%shz,%i;\r\n",sender_name, hz);
+								clean_after_all(y);
 							}
 							else{
-								USART_send(":STM%s%s;\r\n", sender_name,
-										command);
+								USART_send(":STM%sCOM404;\r\n", sender_name);
 								clean_after_all(y);
 							}
 						}
@@ -411,18 +406,21 @@ int main(void)
 		}
 		if (sin_transmit == 1) {
 			arg = 50;
-			if(ms_set==1){
-				a+=hz;
-				USART_send(":STM%ssin,%i,%i;\r\n", sender_name ,b,tablica_wartosci[a]);
-				a+=hz;
-				b++;
-				ms_set=0;
-			}
-			if(a > 10000){
+			if(a > 9999){
 				sin_transmit=0;
 				a=0;
+				b=0;
+				clean_after_all(10);
+			}else{
+				if(ms_set==1){
+					USART_send(":STM%ssin,%i,%i;\r\n", sender_name ,b,tablica_wartosci[a]);
+					ms_set=0;
+					a+=hz;
+					b++;
+				}
 			}
 		}
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -464,11 +462,11 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -511,7 +509,7 @@ static void MX_ADC1_Init(void)
   }
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_0;
+  sConfig.Channel = ADC_CHANNEL_1;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
