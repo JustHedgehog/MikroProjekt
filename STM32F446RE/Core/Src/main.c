@@ -39,6 +39,7 @@ void clean_frame(char * tab ,int len);
 void clean_after_all(int len);
 int tmp_to_hz(uint32_t temp);
 void clean_frame(char * tab ,int len);
+void USART_send(char* format,...);
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -50,6 +51,11 @@ void clean_frame(char * tab ,int len);
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
+DAC_HandleTypeDef hdac;
+DMA_HandleTypeDef hdma_dac1;
+
+TIM_HandleTypeDef htim6;
+
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
@@ -60,8 +66,8 @@ extern uint16_t arg;
 
 //BUFOROWE ZMIENNE
 
-#define USART_TXBUF_LEN 2000 //długość nadawczego bufora
-#define USART_RXBUF_LEN 2000 //długość odbiorczego bufora
+#define USART_TXBUF_LEN 20000 //długość nadawczego bufora
+#define USART_RXBUF_LEN 20000 //długość odbiorczego bufora
 uint8_t USART_TxBuf[USART_TXBUF_LEN]; //bufor nadawczy
 uint8_t USART_RxBuf[USART_RXBUF_LEN]; //bufor odbiorczy
 
@@ -102,7 +108,7 @@ int zakonczone = 1;
 
 // zmienne do DMA
 
-uint16_t dma_buff[4096];
+uint16_t dma_buff[1024];
 uint32_t i=0;
 uint32_t suma_dma;
 
@@ -110,6 +116,16 @@ uint32_t suma_dma;
 
 int sin_transmit = 0;
 int hz=0;
+
+//Zmienne flagowe ADC
+
+int adc_half_buff = 0;
+int adc_all_buff = 0;
+
+//Zmienne do DAC
+
+uint16_t tab[];
+
 
 /* USER CODE END PV */
 
@@ -119,6 +135,8 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_DAC_Init(void);
+static void MX_TIM6_Init(void);
 /* USER CODE BEGIN PFP */
 void MySysTick(int arg){
 
@@ -172,6 +190,7 @@ uint16_t USART_GD(char *buf){
 			if ((bf[index] == FREND)) {
 				for (int i = 0; i <= index; i++) {
 					buff_helper[i] = bf[i];
+					buf[i] = bf[i];
 				}
 				len_com = index;
 				int y = 0, i = 0;
@@ -190,7 +209,8 @@ uint16_t USART_GD(char *buf){
 								frame[y] = FRCOD;
 								i++;
 							} else {
-								i = len_com;
+								i = len_com+1;
+								clean_after_all(y);
 							}
 							break;
 						}
@@ -211,6 +231,11 @@ uint16_t USART_GD(char *buf){
 									} else if (memcmp("sin", command, 3) == 0) {
 										sin_transmit = 1;
 										hz = tmp_to_hz(temp);
+//										for(int i=0 ; i<size ; i++){
+//											dac_tab[i] = tablica_wartosci[hz_arr];
+//											hz_arr += hz;
+//										}
+
 									} else if (memcmp("hz", command, 2) == 0) {
 										hz = tmp_to_hz(temp);
 										USART_send(":STM%shz,%i;\r\n", sender_name, hz);
@@ -236,6 +261,7 @@ uint16_t USART_GD(char *buf){
 					}
 				}
 				index = 0;
+				return 0;
 			} else {
 				index++;
 				if (index > 526) {
@@ -245,6 +271,7 @@ uint16_t USART_GD(char *buf){
 			}
 		}
 	}
+
 	return 0;
 }//Funkcja odbierająca dane
 
@@ -298,22 +325,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
 
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1){
-	int i;
-	suma_dma=0;
-	for(i= 2048 ; i<4096 ; i++){
-		suma_dma += dma_buff[i];
-	}
-	temp = (((suma_dma/2048)*3.3)/4095)*100;
+
+	adc_all_buff=1;
+
 }
 
 void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
-	int i;
-	suma_dma=0;
-	for(i= 0 ; i<2048 ; i++){
-		suma_dma += dma_buff[i];
-	}
-	temp = (((suma_dma/2048)*3.3)/4095)*100;
+
+	adc_half_buff=1;
+
 }
+
+
+
+
 
 
 void generacja_sinusa(int  *tablica_wartosci ) {
@@ -394,16 +419,20 @@ int main(void)
   MX_DMA_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
+  MX_DAC_Init();
+  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
-  HAL_ADC_Start_DMA(&hadc1,dma_buff, 4096); // Start ADC z DMA
+  HAL_ADC_Start_DMA(&hadc1,dma_buff, 1024); // Start ADC z DMA
+  HAL_TIM_Base_Start(&htim6);
+//  HAL_DAC_Start_DMA(&hdac, DAC1_CHANNEL_1, dac_tab, size, DAC_ALIGN_12B_R);
 
   int len = 0,b=0,a=0;
   char bx[1052]; //ewentualnie 526
   clean_frame(bx, 1051);
   generacja_sinusa(tablica_wartosci);
   clean_frame(frame, len);
-  arg=50;
+  arg=250;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -421,7 +450,6 @@ int main(void)
 				a=0;
 				b=0;
 				clean_after_all(10);
-				arg=200;
 			}else{
 				if(ms_set==1){
 					USART_send(":STM%ssin,%i,%i;\r\n", sender_name ,b,tablica_wartosci[a]);
@@ -430,6 +458,22 @@ int main(void)
 					b++;
 				}
 			}
+		}
+		if (adc_all_buff == 1) {
+			suma_dma = 0;
+			for (int i = 512; i < 1024; i++) {
+				suma_dma += dma_buff[i];
+			}
+			temp = (((suma_dma / 512) * 3.3) / 4095) * 100;
+			adc_all_buff =0;
+		}
+		if (adc_half_buff == 1) {
+			suma_dma = 0;
+			for (i = 0; i < 512; i++) {
+				suma_dma += dma_buff[i];
+			}
+			temp = (((suma_dma / 512) * 3.3) / 4095) * 100;
+			adc_half_buff=0;
 		}
 
 
@@ -453,14 +497,19 @@ void SystemClock_Config(void)
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
-  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 4;
+  RCC_OscInitStruct.PLL.PLLN = 160;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLR = 2;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -469,12 +518,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLRCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV16;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
   {
     Error_Handler();
   }
@@ -531,6 +580,82 @@ static void MX_ADC1_Init(void)
 }
 
 /**
+  * @brief DAC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_DAC_Init(void)
+{
+
+  /* USER CODE BEGIN DAC_Init 0 */
+
+  /* USER CODE END DAC_Init 0 */
+
+  DAC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN DAC_Init 1 */
+
+  /* USER CODE END DAC_Init 1 */
+  /** DAC Initialization
+  */
+  hdac.Instance = DAC;
+  if (HAL_DAC_Init(&hdac) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** DAC channel OUT1 config
+  */
+  sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN DAC_Init 2 */
+
+  /* USER CODE END DAC_Init 2 */
+
+}
+
+/**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 0;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 999;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+
+  /* USER CODE END TIM6_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -571,8 +696,12 @@ static void MX_DMA_Init(void)
 
   /* DMA controller clock enable */
   __HAL_RCC_DMA2_CLK_ENABLE();
+  __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
   /* DMA2_Stream0_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
@@ -591,6 +720,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
 }
 
