@@ -40,6 +40,7 @@ void clean_after_all(int len);
 int tmp_to_hz(uint32_t temp);
 void clean_frame(char * tab ,int len);
 void USART_send(char* format,...);
+void dac_tab_update(int hz , uint16_t *dac_fill_tab);
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -70,14 +71,13 @@ extern uint16_t arg;
 #define USART_RXBUF_LEN 20000 //długość odbiorczego bufora
 uint8_t USART_TxBuf[USART_TXBUF_LEN]; //bufor nadawczy
 uint8_t USART_RxBuf[USART_RXBUF_LEN]; //bufor odbiorczy
-
+//Wskaźniki
 __IO int USART_TX_Empty = 0;
 __IO int USART_TX_Busy = 0;
 __IO int USART_RX_Empty = 0;
 __IO int USART_RX_Busy = 0;
 
 //ZMIENNE DO GENERACJI SINUSA
-
 uint16_t fs = 10000;
 const double PI = 3.14;
 int f = 1;
@@ -89,22 +89,21 @@ uint32_t temp;
 
 //ZMIENNE DO RAMKI
 
-#define  FRSTART 0x3A
-#define FREND 0x3B
-#define FRCOD 0x5C
-#define FRCODS 0x61
-#define FRCODE 0x62
-int fr_busy = 0;
-char receiver_name[4];
-char sender_name[4];
-char command[257];
-char frame[264];
-int frame_read=0;
+#define  FRSTART 0x3A //znak początku ramki
+#define FREND 0x3B //znak końca ramki
+#define FRCOD 0x5C //znak kodujący
+#define FRCODS 0x61 //znak zakodowany oznaczający znak startu ramki
+#define FRCODE 0x62 //znak zakodowany oznaczajacy znak konca ramki
+
+char receiver_name[4]; //tablica na nazwę odbiorcy
+char sender_name[4]; // tablica na nazwe wysyłającego
+char command[257]; // tablica na komende
+char frame[264]; // tablica na ramkę
+int frame_read=0; //zmienna mówiąca czy przetwarzana jest ramka
 
 //zmienne do testów
 
-int k=0;
-int zakonczone = 1;
+
 
 // zmienne do DMA
 
@@ -124,8 +123,13 @@ int adc_all_buff = 0;
 
 //Zmienne do DAC
 
-uint16_t tab[];
+uint16_t dac_tab[128];
+uint8_t tabI = 0;
 
+//Zmienne flagowe DAC
+
+int dac_half_buff = 0;
+int dac_all_buff = 0;
 
 /* USER CODE END PV */
 
@@ -150,7 +154,7 @@ void MySysTick(int arg){
 
 }
 
-uint8_t USART_RX_IsEmpty(){
+uint8_t USART_RX_IsNotEmpty(){
 	if(USART_RX_Busy == USART_RX_Empty)
 	{
 		return 0;
@@ -173,32 +177,31 @@ uint8_t USART_GC(){
 	}
 } //Funkcja zwracająca znak
 
-uint16_t USART_GD(char *buf){
-	static uint8_t bf[1052];
+uint16_t USART_GD(){
+	static uint8_t bf[1052]; //buffor składujący znaki
 	static uint16_t index=0;
-	uint8_t buff_helper[1052];
-	uint16_t len_com;
-	while(USART_RX_IsEmpty())
+	uint8_t buff_helper[1052]; //bufor pomocniczy
+	uint16_t len_com; //długość komendy
+	while(USART_RX_IsNotEmpty()) //Jeżeli buffor odbiorczy nie jest pusty następuje czytanie znaków
 	{
-		bf[index] = USART_GC();
-		if(bf[index] == FRSTART){
-			frame_read = 1;
-			bf[0] = bf[index];
-			index = 0;
+		bf[index] = USART_GC(); //przeczytanie pojedynczego znaku
+		if(bf[index] == FRSTART){ //sprawdzenie czy jest to znak początku ramki
+			frame_read = 1; //włączenie czytania ramki
+			bf[0] = bf[index]; //zabezpieczenie przez kilkoma znakami początku
+			index = 0; //zabezpieczenie przez kilkoma znakami początku
 		}
-		if (frame_read == 1) {
-			if ((bf[index] == FREND)) {
+		if (frame_read == 1) { //Rozpoczęcie składowania ramki
+			if ((bf[index] == FREND)) { //Napotkanie znaku końca ramki prowadzi do przekazania informacji z buffora składującego do buffora pomocniczego
 				for (int i = 0; i <= index; i++) {
 					buff_helper[i] = bf[i];
-					buf[i] = bf[i];
 				}
-				len_com = index;
+				len_com = index; //długość komendy jest równa indexowi
 				int y = 0, i = 0;
-				if (len_com > 6) {
-					while (i <= len_com) {
-						char singlefrchar = buff_helper[i];
-						switch (singlefrchar) {
-						case FRCOD: {
+				if (len_com > 6) { //Sprawdzenie czy długość ramki zawiera minimalną możliwą długość
+					while (i <= len_com) { //Początek dekodawania ramki
+						char singlefrchar = buff_helper[i]; // wczytanie pojedynczego znaku z buffora pomocniczego
+						switch (singlefrchar) { // w zależności od znaku dekodowanie lub przepisanie wartości lub przejście do wykonania komendy z ramki
+						case FRCOD: { //w przypadku znaku kodowania odkodowanie wartości
 							if (buff_helper[i + 1] == FRCODS) {
 								frame[y] = FRSTART;
 								i++;
@@ -208,65 +211,65 @@ uint16_t USART_GD(char *buf){
 							} else if (buff_helper[i + 1] == FRCOD) {
 								frame[y] = FRCOD;
 								i++;
-							} else {
+							} else { //W momencie znalezienia kodowania, które nie zostało uwzględnione w protokole reset , nie jest to ramka
 								i = len_com+1;
 								clean_after_all(y);
 							}
 							break;
 						}
-						case FREND: {
-							memcpy(sender_name, &frame[1], 3);
-							memcpy(receiver_name, &frame[4], 3);
-							memcpy(command, &frame[7], (y - 6));
-							//					wykonywanie komendy
-							if (memcmp("STM", receiver_name, 3) == 0
+						case FREND: { // W przypadku znalezienia znaku końca ramki
+							if(y > 263){ // Jeżeli ramka ma więcej niż 263 znaki bez liczenia znaku końca ramki, przekracza ona wymagania protokołu(błąd)
+								clean_after_all(y);
+								break;
+							}
+							//Podzielenie ramki na poszczególne elementy
+							memcpy(sender_name, &frame[1], 3); // nazwa wysyłającego
+							memcpy(receiver_name, &frame[4], 3); // nazwa odbiorcy
+							memcpy(command, &frame[7], (y - 6)); // komenda
+							//wykonywanie komendy
+							if (memcmp("STM", receiver_name, 3) == 0 //warunek sprawdzający czy dana ramka nie została wysłana przez STM do STM
 									&& memcmp("STM", sender_name, 3) != 0) {
-								if (memcmp("", command, 1) == 0) {
-									USART_send(":STM%sFREMPTY;\r\n", sender_name);
+								if (memcmp("", command, 1) == 0) { // Warunek sprawdzający czy ramka posiada w sobie komendę
+									USART_send(":STM%sFREMPTY;", sender_name);
 									clean_after_all(y);
 								} else {
+									//Wykonanie poszczególnych komend
 									if (memcmp("temp", command, 4) == 0) {
-										USART_send(":STM%stemp,%i;\r\n", sender_name,temp);
-										clean_after_all(y);
+										USART_send(":STM%stemp,%i;", sender_name,temp); //wysłanie komunikatu zwrotnego z informacją o temperaturze
+										clean_after_all(y); //wyczyszczenie ramki
 									} else if (memcmp("sin", command, 3) == 0) {
-										sin_transmit = 1;
-										hz = tmp_to_hz(temp);
-//										for(int i=0 ; i<size ; i++){
-//											dac_tab[i] = tablica_wartosci[hz_arr];
-//											hz_arr += hz;
-//										}
-
+										sin_transmit = 1; //ustawienie flagi do wysyłania wartości z tablicy wartości
 									} else if (memcmp("hz", command, 2) == 0) {
-										hz = tmp_to_hz(temp);
-										USART_send(":STM%shz,%i;\r\n", sender_name, hz);
-										clean_after_all(y);
-
+										hz = tmp_to_hz(temp); //obliczenie hz
+										USART_send(":STM%shz,%i;", sender_name, hz); //wysłanie komunikatu zwrotnego z obecnymi hz'ami
+										clean_after_all(y); // wyczyszczenie ramki
 									} else {
-										USART_send(":STM%sCOM404;\r\n", sender_name);
-										clean_after_all(y);
+										//Komunikat o nierozpoznanej komendzie w ramce
+										USART_send(":STM%sCOM404;", sender_name); //wysłanie komunikatu zwrotnego o nierozpoznaniu komendy
+										clean_after_all(y); //wyczyszczenie ramki
 
 									}
 								}
 							} else {
-								clean_after_all(y);
+								clean_after_all(y); // wyczyszczenie ramki w przypadku odebrania ramki od samego siebie
 							}
 							break;
 						}
 						default: {
-							frame[y] = buff_helper[i];
+							frame[y] = buff_helper[i]; // przepisanie znaku z buffora pomocniczego do ramki
 						}
 						}
 						y++;
 						i++;
 					}
 				}
-				index = 0;
+				index = 0; //wyzerowanie indexu
 				return 0;
 			} else {
 				index++;
-				if (index > 526) {
-					index = 0;
-					frame_read = 0;
+				if (index > 526) { //Sprawdzenie czy odbierane wartości są nie większe niż 526 znaku.
+					index = 0; //wyzerowanie indexu
+					frame_read = 0; //wyłączenie czytania ramki
 				}
 			}
 		}
@@ -313,44 +316,51 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
 			HAL_UART_Transmit_IT(&huart2, &tmp , 1);
 		}
 	}
-}
+}//Callback USART nadawania
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
-	if(huart == &huart2){
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+	if (huart == &huart2) {
 		USART_RX_Empty++;
-		if(USART_RX_Empty >= USART_RXBUF_LEN) USART_RX_Empty=0;
+		if (USART_RX_Empty >= USART_RXBUF_LEN)
+			USART_RX_Empty = 0;
 		HAL_UART_Receive_IT(&huart2, &USART_RxBuf[USART_RX_Empty], 1);
 	}
-}
+} //Callback USART odbiór
 
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc1) {
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc1){
-
-	adc_all_buff=1;
-
-}
-
-void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef* hadc1){
-
-	adc_half_buff=1;
+	adc_all_buff = 1;
 
 }
 
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc1) {
 
+	adc_half_buff = 1;
 
+}
+
+void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
+
+	dac_all_buff = 1;
+}
+
+void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
+
+	dac_half_buff = 1;
+}
 
 
 
 void generacja_sinusa(int  *tablica_wartosci ) {
 
-	int n,f=1; // n = ilość próbek na jeden okres sygnału
+	int n,f=1; // n = ilość próbek na jeden okres sygnału f- częstotliwość
 	double faza_sygnalu;
 	uint16_t i = 0;
 	n = fs / f; //obliczenie ilości próbek w momencie zmiany f
 
 	while (i < n) {
 		faza_sygnalu = ((i * 2 * PI * f) / fs);
-		*(tablica_wartosci+i) = 2048 + (sin(faza_sygnalu) * 2048);
+		*(tablica_wartosci+i) = 2048 + (sin(faza_sygnalu) * 2048); //kodowanie wartości sinusa
 		i = i + 1;
 	}
 	i = 0;
@@ -381,6 +391,16 @@ int tmp_to_hz(uint32_t temp){
 	}
 	return hz;
 }
+
+void dac_tab_update(int hz , uint16_t *dac_fill_tab){
+	int y=0;
+	for(int i = 0; i<10000 ; i+=hz){
+		dac_fill_tab[y] = tablica_wartosci[i];
+		y++;
+	}
+
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -422,51 +442,46 @@ int main(void)
   MX_DAC_Init();
   MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
-  HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1);
+  HAL_UART_Receive_IT(&huart2, &USART_RxBuf[0], 1); //Start UART
   HAL_ADC_Start_DMA(&hadc1,dma_buff, 1024); // Start ADC z DMA
-  HAL_TIM_Base_Start(&htim6);
-//  HAL_DAC_Start_DMA(&hdac, DAC1_CHANNEL_1, dac_tab, size, DAC_ALIGN_12B_R);
+  HAL_TIM_Base_Start(&htim6); //Start timera
+  HAL_DAC_Start_DMA(&hdac, DAC1_CHANNEL_1, dac_tab, 128, DAC_ALIGN_12B_R); //Starta DAC z DMA
 
-  int len = 0,b=0,a=0;
-  char bx[1052]; //ewentualnie 526
-  clean_frame(bx, 1051);
-  generacja_sinusa(tablica_wartosci);
-  clean_frame(frame, len);
-  arg=250;
+  int b=0,a=0;
+  generacja_sinusa(tablica_wartosci); //wygenerowanie tablicy wartości
+  arg=200; //ustawienie czasu delay dla systicka
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+		hz = tmp_to_hz(temp);
+		int size = 10000/hz;
+		uint16_t dac_fill_tab[size];
+		dac_tab_update(hz, dac_fill_tab);
+
 		if(ms_set==1){
-			USART_GD(bx);
+			USART_GD();
 			ms_set=0;
 		}
+
 		if (sin_transmit == 1) {
-			arg = 50;
 			if(a > 9999){
 				sin_transmit=0;
 				a=0;
 				b=0;
 				clean_after_all(10);
 			}else{
-				if(ms_set==1){
-					USART_send(":STM%ssin,%i,%i;\r\n", sender_name ,b,tablica_wartosci[a]);
+					USART_send(":STM%ssin,%i,%i;", sender_name ,b,dac_fill_tab[b]);
 					ms_set=0;
 					a+=hz;
 					b++;
-				}
 			}
 		}
-		if (adc_all_buff == 1) {
-			suma_dma = 0;
-			for (int i = 512; i < 1024; i++) {
-				suma_dma += dma_buff[i];
-			}
-			temp = (((suma_dma / 512) * 3.3) / 4095) * 100;
-			adc_all_buff =0;
-		}
+
 		if (adc_half_buff == 1) {
 			suma_dma = 0;
 			for (i = 0; i < 512; i++) {
@@ -476,6 +491,36 @@ int main(void)
 			adc_half_buff=0;
 		}
 
+		if (adc_all_buff == 1) {
+			suma_dma = 0;
+			for (int i = 512; i < 1024; i++) {
+				suma_dma += dma_buff[i];
+			}
+			temp = (((suma_dma / 512) * 3.3) / 4095) * 100;
+			adc_all_buff =0;
+		}
+
+		if(dac_half_buff == 1){
+			for(int i =0 ; i<64 ; i++){
+				dac_tab[i] = dac_fill_tab[tabI];
+				tabI++;
+				if(tabI > size){
+					tabI=0;
+				}
+			}
+			dac_half_buff=0;
+		}
+
+		if(dac_all_buff == 1){
+			for(int i = 64 ; i<128 ; i++){
+				dac_tab[i] = dac_fill_tab[tabI];
+				tabI++;
+				if(tabI > size){
+					tabI=0;
+				}
+			}
+			dac_all_buff=0;
+		}
 
 
     /* USER CODE END WHILE */
