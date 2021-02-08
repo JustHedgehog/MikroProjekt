@@ -124,7 +124,7 @@ int adc_all_buff = 0;
 //Zmienne do DAC
 
 uint16_t dac_tab[128];
-uint8_t tabI = 0;
+uint16_t tabI = 0;
 
 //Zmienne flagowe DAC
 
@@ -342,11 +342,13 @@ void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc1) {
 void HAL_DAC_ConvCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 
 	dac_all_buff = 1;
+
 }
 
 void HAL_DAC_ConvHalfCpltCallbackCh1(DAC_HandleTypeDef *hdac) {
 
 	dac_half_buff = 1;
+
 }
 
 
@@ -386,19 +388,7 @@ void clean_after_all(int len){
 int tmp_to_hz(uint32_t temp){
 	int value,hz=200;
 	value = 55+temp;
-	for(int i =0 ; i<value;i++){
-		hz+=9;
-	}
-	return hz;
-}
-
-void dac_tab_update(int hz , uint16_t *dac_fill_tab){
-	int y=0;
-	for(int i = 0; i<10000 ; i+=hz){
-		dac_fill_tab[y] = tablica_wartosci[i];
-		y++;
-	}
-
+	return hz + (value*9);
 }
 
 /* USER CODE END PFP */
@@ -459,9 +449,6 @@ int main(void)
   {
 
 		hz = tmp_to_hz(temp);
-		int size = 10000/hz;
-		uint16_t dac_fill_tab[size];
-		dac_tab_update(hz, dac_fill_tab);
 
 		if(ms_set==1){
 			USART_GD();
@@ -475,7 +462,7 @@ int main(void)
 				b=0;
 				clean_after_all(10);
 			}else{
-					USART_send(":STM%ssin,%i,%i;", sender_name ,b,dac_fill_tab[b]);
+					USART_send(":STM%ssin,%i,%i;", sender_name ,b,tablica_wartosci[a]);
 					ms_set=0;
 					a+=hz;
 					b++;
@@ -502,10 +489,10 @@ int main(void)
 
 		if(dac_half_buff == 1){
 			for(int i =0 ; i<64 ; i++){
-				dac_tab[i] = dac_fill_tab[tabI];
-				tabI++;
-				if(tabI > size){
-					tabI=0;
+				dac_tab[i] = tablica_wartosci[tabI];
+				tabI+=hz;
+				if(tabI > 10000){
+					tabI-=10000;
 				}
 			}
 			dac_half_buff=0;
@@ -513,10 +500,10 @@ int main(void)
 
 		if(dac_all_buff == 1){
 			for(int i = 64 ; i<128 ; i++){
-				dac_tab[i] = dac_fill_tab[tabI];
-				tabI++;
-				if(tabI > size){
-					tabI=0;
+				dac_tab[i] = tablica_wartosci[tabI];
+				tabI+=hz;
+				if(tabI > 10000){
+					tabI-=10000;
 				}
 			}
 			dac_all_buff=0;
